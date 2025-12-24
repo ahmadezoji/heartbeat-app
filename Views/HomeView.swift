@@ -146,7 +146,7 @@ struct HomeView: View {
                 Spacer()
                 Image(systemName: "metronome.fill")
                     .font(.title2)
-                    .foregroundStyle(.accent)
+                    .foregroundStyle(.tint)
             }
         }
         .padding()
