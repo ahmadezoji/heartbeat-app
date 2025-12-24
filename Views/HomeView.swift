@@ -97,7 +97,7 @@ struct HomeView: View {
                     Label(audioManager.isPlaying ? "Stop" : "Play", systemImage: audioManager.isPlaying ? "stop.fill" : "play.fill")
                         .padding(.horizontal, 12)
                         .padding(.vertical, 8)
-                        .background(Color.accentColor)
+                        .background(Color.blue)
                         .foregroundStyle(.white)
                         .clipShape(Capsule())
                 }

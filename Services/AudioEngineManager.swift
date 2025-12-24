@@ -22,7 +22,15 @@ final class AudioEngineManager: ObservableObject {
     func loadAudio(from url: URL) {
         stop()
         do {
-            let file = try AVAudioFile(forReading: url)
+            let needsSecurityScope = url.startAccessingSecurityScopedResource()
+            defer {
+                if needsSecurityScope {
+                    url.stopAccessingSecurityScopedResource()
+                }
+            }
+
+            let fileURL = try makeLocalCopyIfNeeded(from: url)
+            let file = try AVAudioFile(forReading: fileURL)
             let format = file.processingFormat
             let frameCount = AVAudioFrameCount(file.length)
             guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount) else {
@@ -100,6 +108,19 @@ final class AudioEngineManager: ObservableObject {
         engine.connect(playerNode, to: timePitch, format: nil)
         engine.connect(timePitch, to: engine.mainMixerNode, format: nil)
         timePitch.rate = 1.0
+    }
+
+    private func makeLocalCopyIfNeeded(from url: URL) throws -> URL {
+        if url.isFileURL == false {
+            return url
+        }
+
+        let tempDir = FileManager.default.temporaryDirectory
+        let destURL = tempDir.appendingPathComponent(url.lastPathComponent)
+        if FileManager.default.fileExists(atPath: destURL.path) == false {
+            try FileManager.default.copyItem(at: url, to: destURL)
+        }
+        return destURL
     }
 
     private func applyTempo(speedMetersPerSecond: Double) {
