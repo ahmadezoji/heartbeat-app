@@ -6,6 +6,14 @@ final class AudioEngineManager: ObservableObject {
     @Published private(set) var currentTrackName = "No track loaded"
     @Published private(set) var statusText = "Import a rhythmic loop to begin."
     @Published private(set) var currentTempo: Double = TempoCalculator.defaultTempo
+    /// The loaded track's own tempo (playback rate 1.0×). Base Tempo and speed
+    /// are applied relative to this, so changing Base Tempo is audible even
+    /// when standing still.
+    @Published private(set) var trackTempo: Double = TempoCalculator.defaultTempo
+
+    /// Default soundtrack bundled in SharedAudio/ (shared with the watch app).
+    static let defaultTrackName = "rythme1"
+    static let defaultTrackBPM: Double = 126
 
     private let engine = AVAudioEngine()
     private let playerNode = AVAudioPlayerNode()
@@ -13,36 +21,62 @@ final class AudioEngineManager: ObservableObject {
     private var audioBuffer: AVAudioPCMBuffer?
     private var baseTempo = TempoCalculator.defaultTempo
     private var speedFactor = TempoCalculator.defaultSpeedFactor
+    private var lastSpeed: Double = 0
 
     init() {
         configureAudioSession()
         configureEngine()
+        loadDefaultTrack()
+    }
+
+    /// Loads the bundled default track so the app plays out of the box.
+    func loadDefaultTrack() {
+        guard let url = Bundle.main.url(forResource: Self.defaultTrackName, withExtension: "mp3") else { return }
+        if loadFile(at: url, displayName: "Rhythm 1 (default)") {
+            trackTempo = Self.defaultTrackBPM
+            applyTempo()
+        }
     }
 
     func loadAudio(from url: URL) {
         stop()
-        do {
-            let needsSecurityScope = url.startAccessingSecurityScopedResource()
-            defer {
-                if needsSecurityScope {
-                    url.stopAccessingSecurityScopedResource()
-                }
+        let needsSecurityScope = url.startAccessingSecurityScopedResource()
+        defer {
+            if needsSecurityScope {
+                url.stopAccessingSecurityScopedResource()
             }
-
+        }
+        do {
             let fileURL = try makeLocalCopyIfNeeded(from: url)
+            if loadFile(at: fileURL, displayName: url.lastPathComponent) {
+                // An imported track's BPM is unknown: treat the current Base Tempo
+                // as its natural speed, so it starts at 1.0× and Base changes from there.
+                trackTempo = baseTempo
+                applyTempo()
+            }
+        } catch {
+            setError("Failed to load audio: \(error.localizedDescription)")
+        }
+    }
+
+    @discardableResult
+    private func loadFile(at fileURL: URL, displayName: String) -> Bool {
+        do {
             let file = try AVAudioFile(forReading: fileURL)
             let format = file.processingFormat
             let frameCount = AVAudioFrameCount(file.length)
             guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount) else {
                 setError("Unable to create audio buffer.")
-                return
+                return false
             }
             try file.read(into: buffer)
             audioBuffer = buffer
-            currentTrackName = url.lastPathComponent
+            currentTrackName = displayName
             statusText = "Ready to play."
+            return true
         } catch {
             setError("Failed to load audio: \(error.localizedDescription)")
+            return false
         }
     }
 
@@ -76,16 +110,17 @@ final class AudioEngineManager: ObservableObject {
 
     func updateBaseTempo(_ tempo: Double) {
         baseTempo = tempo
-        applyTempo(speedMetersPerSecond: 0)
+        applyTempo()
     }
 
     func updateSpeedFactor(_ factor: Double) {
         speedFactor = factor
-        applyTempo(speedMetersPerSecond: 0)
+        applyTempo()
     }
 
     func updateSpeed(_ speed: Double) {
-        applyTempo(speedMetersPerSecond: speed)
+        lastSpeed = speed
+        applyTempo()
     }
 
     func setError(_ message: String) {
@@ -123,15 +158,17 @@ final class AudioEngineManager: ObservableObject {
         return destURL
     }
 
-    private func applyTempo(speedMetersPerSecond: Double) {
+    private func applyTempo() {
         let newTempo = TempoCalculator.calculateTempo(
             baseTempo: baseTempo,
-            speedMetersPerSecond: speedMetersPerSecond,
+            speedMetersPerSecond: lastSpeed,
             speedFactor: speedFactor
         )
         currentTempo = newTempo
 
-        let rate = TempoCalculator.rate(for: newTempo, baseTempo: baseTempo)
+        // Relative to the track's own tempo (not baseTempo), otherwise the rate
+        // is always 1.0× when standing still and Base Tempo has no audible effect.
+        let rate = TempoCalculator.rate(for: newTempo, baseTempo: trackTempo)
         timePitch.rate = Float(rate)
         if isPlaying {
             statusText = "Playing at \(Int(newTempo)) BPM."

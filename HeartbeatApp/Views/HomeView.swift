@@ -8,20 +8,33 @@ struct HomeView: View {
     @State private var showImporter = false
     @State private var baseTempo: Double = TempoCalculator.defaultTempo
     @State private var speedFactor: Double = TempoCalculator.defaultSpeedFactor
+    @State private var didSetInitialTempo = false
+    @State private var pulse = false
+
+    private let accent = Color("AccentColor")
+    private let tempoRange: ClosedRange<Double> = 40...200
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(spacing: 20) {
-                    header
-                    audioSection
-                    tempoSection
-                    locationSection
+            ZStack {
+                LinearGradient(
+                    colors: [accent.opacity(0.45), Color.black, Color.black],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .ignoresSafeArea()
+
+                ScrollView {
+                    VStack(spacing: 16) {
+                        playerCard
+                        baseTempoCard
+                        speedCard
+                    }
+                    .padding(.horizontal)
+                    .padding(.bottom, 24)
                 }
-                .padding()
             }
-            .background(Color(.systemBackground))
-            .navigationTitle("Home")
+            .navigationTitle("Heartbeat")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
@@ -29,9 +42,11 @@ struct HomeView: View {
                     } label: {
                         Label("Import", systemImage: "square.and.arrow.down")
                     }
+                    .tint(.white)
                 }
             }
         }
+        .preferredColorScheme(.dark)
         .fileImporter(
             isPresented: $showImporter,
             allowedContentTypes: [UTType.audio],
@@ -55,7 +70,15 @@ struct HomeView: View {
         .onChange(of: locationManager.speedMetersPerSecond) { newValue in
             audioManager.updateSpeed(newValue)
         }
+        .onChange(of: audioManager.isPlaying) { playing in
+            pulse = playing
+        }
         .onAppear {
+            if !didSetInitialTempo {
+                // Start at the loaded track's own tempo (126 BPM for the default song).
+                baseTempo = audioManager.trackTempo
+                didSetInitialTempo = true
+            }
             audioManager.updateBaseTempo(baseTempo)
             audioManager.updateSpeedFactor(speedFactor)
             locationManager.requestAuthorization()
@@ -63,115 +86,176 @@ struct HomeView: View {
         }
     }
 
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Adaptive Loop Player")
-                .font(.title.bold())
-                .foregroundStyle(.primary)
-            Text("Import a rhythmic loop (wav, mp3, aiff) and let your speed change the tempo.")
-                .font(.subheadline)
+    // MARK: - Player
+
+    private var playbackRate: Double {
+        TempoCalculator.rate(for: audioManager.currentTempo, baseTempo: audioManager.trackTempo)
+    }
+
+    private var playerCard: some View {
+        VStack(spacing: 18) {
+            HStack(spacing: 12) {
+                Image(systemName: "music.note")
+                    .font(.headline)
+                    .foregroundStyle(accent)
+                    .frame(width: 36, height: 36)
+                    .background(accent.opacity(0.15))
+                    .clipShape(Circle())
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(audioManager.currentTrackName)
+                        .font(.headline)
+                        .lineLimit(1)
+                    Text("Original tempo \(Int(audioManager.trackTempo)) BPM")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+            }
+
+            VStack(spacing: 4) {
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    Image(systemName: "heart.fill")
+                        .font(.title)
+                        .foregroundStyle(accent)
+                        .scaleEffect(pulse ? 1.18 : 0.92)
+                        .animation(
+                            audioManager.isPlaying
+                                ? .easeInOut(duration: 30 / max(audioManager.currentTempo, 1)).repeatForever(autoreverses: true)
+                                : .default,
+                            value: pulse
+                        )
+                    Text("\(Int(audioManager.currentTempo))")
+                        .font(.system(size: 76, weight: .bold, design: .rounded))
+                        .monospacedDigit()
+                    Text("BPM")
+                        .font(.headline)
+                        .foregroundStyle(.secondary)
+                }
+                Text(String(format: "%.2f× speed", playbackRate))
+                    .font(.subheadline.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+
+            Button {
+                audioManager.togglePlayback()
+            } label: {
+                Label(audioManager.isPlaying ? "Stop" : "Play",
+                      systemImage: audioManager.isPlaying ? "stop.fill" : "play.fill")
+                    .font(.headline)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 16)
+                    .background(audioManager.isPlaying ? Color.white.opacity(0.15) : accent)
+                    .foregroundStyle(.white)
+                    .clipShape(Capsule())
+            }
+
+            Text(audioManager.statusText)
+                .font(.caption)
                 .foregroundStyle(.secondary)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding()
-        .background(.ultraThinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .card()
     }
 
-    private var audioSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Audio")
-                .font(.headline)
+    // MARK: - Base tempo
+
+    private var baseTempoCard: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            cardTitle("Base tempo", subtitle: "Your tempo when standing still")
             HStack {
-                VStack(alignment: .leading) {
-                    Text(audioManager.currentTrackName)
-                        .font(.subheadline.bold())
-                    Text(audioManager.statusText)
-                        .font(.caption)
+                roundButton("minus") { baseTempo = max(tempoRange.lowerBound, baseTempo - 2) }
+                Spacer()
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text("\(Int(baseTempo))")
+                        .font(.system(size: 40, weight: .bold, design: .rounded))
+                        .monospacedDigit()
+                    Text("BPM")
+                        .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                Button {
-                    audioManager.togglePlayback()
-                } label: {
-                    Label(audioManager.isPlaying ? "Stop" : "Play", systemImage: audioManager.isPlaying ? "stop.fill" : "play.fill")
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
-                        .background(Color.accentColor)
-                        .foregroundStyle(.white)
-                        .clipShape(Capsule())
-                }
+                roundButton("plus") { baseTempo = min(tempoRange.upperBound, baseTempo + 2) }
             }
         }
-        .padding()
-        .background(Color.white.opacity(0.9))
-        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .card()
     }
 
-    private var tempoSection: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Tempo")
-                .font(.headline)
+    // MARK: - Speed
 
+    private var speedCard: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            cardTitle("Speed influence", subtitle: "How much running faster raises the tempo")
+            Slider(value: $speedFactor, in: 0...12, step: 0.5)
+                .tint(accent)
             HStack {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Base Tempo")
-                        .font(.subheadline)
-                    Text("\(Int(baseTempo)) BPM")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                Stepper(value: $baseTempo, in: 40...140, step: 1) {
-                    EmptyView()
-                }
-            }
-
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Speed Influence")
-                    .font(.subheadline)
-                Slider(value: $speedFactor, in: 0...12, step: 0.5)
                 Text("+\(speedFactor, specifier: "%.1f") BPM per m/s")
+                    .font(.subheadline.monospacedDigit())
+                Spacer()
+                // At 10 km/h (≈ 2.78 m/s) — makes the slider's effect visible while standing still.
+                Text("At 10 km/h: +\(Int((speedFactor * 10 / 3.6).rounded())) BPM")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
 
-            HStack {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Live Tempo")
-                        .font(.subheadline)
-                    Text("\(Int(audioManager.currentTempo)) BPM")
-                        .font(.title3.bold())
+            Divider().overlay(Color.white.opacity(0.1))
+
+            HStack(spacing: 12) {
+                Image(systemName: "location.fill")
+                    .foregroundStyle(accent)
+                    .frame(width: 36, height: 36)
+                    .background(accent.opacity(0.15))
+                    .clipShape(Circle())
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("\(locationManager.speedKilometersPerHour, specifier: "%.1f") km/h")
+                        .font(.title3.bold().monospacedDigit())
+                    Text("\(locationManager.speedMetersPerSecond, specifier: "%.2f") m/s · \(locationManager.statusText)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
                 }
                 Spacer()
-                Image(systemName: "metronome.fill")
-                    .font(.title2)
-                    .foregroundStyle(.tint)
             }
         }
-        .padding()
-        .background(Color.white.opacity(0.9))
-        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .card()
     }
 
-    private var locationSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Location & Speed")
+    // MARK: - Helpers
+
+    private func cardTitle(_ title: String, subtitle: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title)
                 .font(.headline)
-            Text(locationManager.statusText)
-                .font(.subheadline)
+            Text(subtitle)
+                .font(.caption)
                 .foregroundStyle(.secondary)
-            HStack {
-                Label("\(locationManager.speedMetersPerSecond, specifier: "%.2f") m/s", systemImage: "location.fill")
-                    .font(.subheadline)
-                Spacer()
-                Label("\(locationManager.speedKilometersPerHour, specifier: "%.1f") km/h", systemImage: "speedometer")
-                    .font(.subheadline)
-            }
         }
-        .padding()
-        .background(Color.white.opacity(0.9))
-        .clipShape(RoundedRectangle(cornerRadius: 16))
+    }
+
+    private func roundButton(_ systemImage: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.title2.bold())
+                .frame(width: 56, height: 56)
+                .background(Color.white.opacity(0.1))
+                .foregroundStyle(.white)
+                .clipShape(Circle())
+        }
+    }
+}
+
+private extension View {
+    /// Translucent card used for every section on the home screen.
+    func card() -> some View {
+        self
+            .padding(20)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    .fill(Color.white.opacity(0.07))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    .stroke(Color.white.opacity(0.08), lineWidth: 1)
+            )
     }
 }
 
