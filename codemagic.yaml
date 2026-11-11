@@ -1,0 +1,126 @@
+# Codemagic: build Heartbeat for iPhone + Apple Watch as one release.
+#
+# Scheme "Heartbeat" builds the iPhone app (sources in HeartbeatApp/,
+# com.runnerclub.heartbeatrunner) and embeds the watch app (HeartbeatWatch/,
+# com.runnerclub.heartbeatrunner.watch). One .ipa contains both; after installing
+# it on the iPhone, the watch app installs from the Watch app → Available Apps.
+# The watch app runs independently of the iPhone app once installed.
+#
+# Signing follows the same pattern as the Lumen Lab project on the same Apple team
+# (Fatih Yurdagul, 52R7YN343V): the existing App Store Connect integration and the
+# existing distribution certificate in Codemagic are reused; each bundle ID needs
+# its own provisioning profile, fetched into Codemagic and referenced by name.
+#
+# Tags pick the workflow (same convention as Lumen Lab):
+#   git tag v1.0.0-ios-adhoc && git push heartbeat v1.0.0-ios-adhoc   → ad hoc .ipa
+#   git tag v1.0.0-ios       && git push heartbeat v1.0.0-ios         → TestFlight
+# ("v*-ios" never matches a tag ending in "-ios-adhoc", so they don't overlap.)
+#
+# ONE-TIME SETUP (developer.apple.com, team Fatih Yurdagl)
+#   1. Identifiers: App ID com.runnerclub.heartbeatrunner (no capabilities).
+#      com.runnerclub.heartbeatrunner.watch already exists (HealthKit on).
+#   2. Profiles → +: create, using the SAME Apple Distribution certificate that
+#      Codemagic holds as "lumenlab-distribution":
+#        Ad hoc:    "Heartbeat iOS - Ad Hoc"     (com.runnerclub.heartbeatrunner)
+#                   "Heartbeat Watch - Ad Hoc"   (com.runnerclub.heartbeatrunner.watch)
+#                   → tick the devices to install on (Kimia iPhone + Kimi's Apple Watch).
+#        TestFlight (later): "Heartbeat iOS - App Store" and "Heartbeat Watch - App Store".
+#   3. Codemagic → Code signing identities → iOS provisioning profiles → Fetch profiles,
+#      import those profiles; names below must match exactly.
+#   Adding a new tester device later = register it, edit both Ad Hoc profiles to include
+#   it, re-fetch them in Codemagic, then push a new -ios-adhoc tag.
+
+definitions:
+  vars: &vars
+    XCODE_PROJECT: HeartbeatWatch.xcodeproj
+    XCODE_SCHEME: Heartbeat                       # iPhone app (embeds the watch app)
+    APP_STORE_APPLE_ID: 0000000000                # ← TestFlight only: app's Apple ID from App Store Connect
+
+  scripts:
+    - &install_watchos
+      name: Install watchOS platform (needed to compile the watch app)
+      script: |
+        xcodebuild -downloadPlatform watchOS || echo "watchOS platform already present or download skipped"
+    - &use_profiles
+      name: Set up code signing settings on Xcode project
+      script: xcode-project use-profiles
+
+  artifacts: &artifacts
+    - build/ios/ipa/*.ipa
+    - /tmp/xcodebuild_logs/*.log
+
+workflows:
+  heartbeat-ios-adhoc:
+    name: Heartbeat iOS + Watch — Ad Hoc (registered devices)
+    max_build_duration: 90
+    instance_type: mac_mini_m2
+    integrations:
+      app_store_connect: lumenlab-ios             # existing key for the Fatih Yurdagul team
+    environment:
+      ios_signing:
+        provisioning_profiles:
+          - "Heartbeat iOS - Ad Hoc"
+          - "Heartbeat Watch - Ad Hoc"
+        certificates:
+          - "lumenlab-distribution"
+      vars: *vars
+      xcode: latest
+    triggering:
+      events:
+        - tag
+      tag_patterns:
+        - pattern: 'v*-ios-adhoc'
+          include: true
+      cancel_previous_builds: true
+    scripts:
+      - *install_watchos
+      - *use_profiles
+      - name: Build ad hoc .ipa (iPhone app + embedded watch app)
+        script: |
+          xcode-project build-ipa \
+            --project "$XCODE_PROJECT" \
+            --scheme "$XCODE_SCHEME" \
+            --archive-xcargs "CURRENT_PROJECT_VERSION=$BUILD_NUMBER"
+    artifacts: *artifacts
+
+  heartbeat-ios-testflight:
+    name: Heartbeat iOS + Watch — TestFlight
+    max_build_duration: 90
+    instance_type: mac_mini_m2
+    integrations:
+      app_store_connect: lumenlab-ios
+    environment:
+      ios_signing:
+        provisioning_profiles:
+          - "Heartbeat iOS - App Store"
+          - "Heartbeat Watch - App Store"
+        certificates:
+          - "lumenlab-distribution"
+      vars: *vars
+      xcode: latest
+    triggering:
+      events:
+        - tag
+      tag_patterns:
+        - pattern: 'v*-ios'
+          include: true
+      cancel_previous_builds: true
+    scripts:
+      - *install_watchos
+      - *use_profiles
+      - name: Set build number (latest TestFlight + 1)
+        script: |
+          LATEST=$(app-store-connect get-latest-testflight-build-number "$APP_STORE_APPLE_ID" || echo 0)
+          echo "NEW_BUILD_NUMBER=$((LATEST + 1))" >> $CM_ENV
+      - name: Build and archive
+        script: |
+          xcode-project build-ipa \
+            --project "$XCODE_PROJECT" \
+            --scheme "$XCODE_SCHEME" \
+            --archive-xcargs "CURRENT_PROJECT_VERSION=$NEW_BUILD_NUMBER"
+    artifacts: *artifacts
+    publishing:
+      app_store_connect:
+        auth: integration
+        submit_to_testflight: true
+        submit_to_app_store: false

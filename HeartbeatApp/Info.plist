@@ -2,16 +2,16 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>Heartbeat keeps measuring your speed in the background so the tempo stays in sync while you run.</string>
+	<key>NSLocationAlwaysUsageDescription</key>
+	<string>Heartbeat keeps measuring your speed in the background so the tempo stays in sync while you run.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Heartbeat uses your location to measure running speed and adapt the tempo.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>audio</string>
 		<string>location</string>
 	</array>
-	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>We need your location to provide location-based services.</string>
-	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-	<string>We need your location to provide continuous location tracking.</string>
-	<key>NSLocationAlwaysUsageDescription</key>
-	<string>We need your location to provide continuous location tracking.</string>
 </dict>
 </plist>
