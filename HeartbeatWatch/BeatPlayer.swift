@@ -55,6 +55,15 @@ final class BeatPlayer: ObservableObject {
     private var baseTempo = TempoCalculator.defaultTempo
     private var speedFactor = TempoCalculator.defaultSpeedFactor
     private var lastSpeed: Double = 0
+    private var lastHeartRate: Double = 0
+
+    /// What drives the music tempo. Only one source is active at a time.
+    enum TempoSource: String, CaseIterable {
+        case location, heartRate
+    }
+    @Published var tempoSource: TempoSource = .location {
+        didSet { recalculateTempo() }
+    }
     /// Incremented on every start/stop so stale callbacks are ignored.
     private var generation = 0
 
@@ -122,12 +131,28 @@ final class BeatPlayer: ObservableObject {
         recalculateTempo()
     }
 
+    /// Safe to call from the background (wrist down) — not tied to the UI.
+    func updateHeartRate(_ bpm: Double) {
+        lastHeartRate = bpm
+        if tempoSource == .heartRate { recalculateTempo() }
+    }
+
     private func recalculateTempo() {
-        currentTempo = TempoCalculator.calculateTempo(
-            baseTempo: baseTempo,
-            speedMetersPerSecond: lastSpeed,
-            speedFactor: speedFactor
-        )
+        switch tempoSource {
+        case .location:
+            currentTempo = TempoCalculator.calculateTempo(
+                baseTempo: baseTempo,
+                speedMetersPerSecond: lastSpeed,
+                speedFactor: speedFactor
+            )
+        case .heartRate:
+            // Music tempo = heart rate, kept inside what the track can play
+            // (0.5×–2×). Until the first reading arrives, use the base tempo.
+            let range = baseTempoRange
+            currentTempo = lastHeartRate > 0
+                ? min(max(lastHeartRate, range.lowerBound), range.upperBound)
+                : baseTempo
+        }
         // Music: play relative to the track's real BPM, so both the Base control
         // and running speed change the playback speed (Base 140 on a 126 BPM
         // track → 1.11×). Comparing to baseTempo instead would always give 1.0×

@@ -8,6 +8,11 @@ struct WatchHomeView: View {
     @State private var speedFactor: Double = TempoCalculator.defaultSpeedFactor
     @State private var pulse = false
     @State private var didSetInitialTempo = false
+    @AppStorage("tempoSource") private var tempoSourceRaw = BeatPlayer.TempoSource.location.rawValue
+
+    private var tempoSource: BeatPlayer.TempoSource {
+        BeatPlayer.TempoSource(rawValue: tempoSourceRaw) ?? .location
+    }
 
     private let accent = Color("AccentColor")
 
@@ -17,8 +22,15 @@ struct WatchHomeView: View {
                 tempoHeader
                 startButton
                 statsRow
-                baseTempoRow
-                speedFactorRow
+                sourcePicker
+                if tempoSource == .location {
+                    baseTempoRow
+                    speedFactorRow
+                } else {
+                    Text("Music follows your heart rate")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                }
                 Toggle("AirPods / headphones", isOn: $beatPlayer.useAirPods)
                     .font(.footnote)
                     .disabled(isRunning)
@@ -43,13 +55,16 @@ struct WatchHomeView: View {
             }
             beatPlayer.updateBaseTempo(baseTempo)
             beatPlayer.updateSpeedFactor(speedFactor)
+            beatPlayer.tempoSource = tempoSource
             // Direct model-to-model link so tempo follows speed with the screen off.
             let player = beatPlayer
             workout.onSpeedChange = { [weak player] speed in player?.updateSpeed(speed) }
+            workout.onHeartRateChange = { [weak player] bpm in player?.updateHeartRate(bpm) }
             workout.requestAuthorization()
         }
         .onChange(of: baseTempo) { beatPlayer.updateBaseTempo($0) }
         .onChange(of: speedFactor) { beatPlayer.updateSpeedFactor($0) }
+        .onChange(of: tempoSourceRaw) { _ in beatPlayer.tempoSource = tempoSource }
     }
 
     private var isRunning: Bool {
@@ -100,6 +115,30 @@ struct WatchHomeView: View {
             Label(workout.heartRate > 0 ? "\(Int(workout.heartRate))" : "--", systemImage: "waveform.path.ecg")
         }
         .font(.caption2)
+    }
+
+    /// Radio-style choice: exactly one source drives the tempo.
+    private var sourcePicker: some View {
+        HStack(spacing: 6) {
+            sourceButton(.location, title: "Speed", icon: "location.fill")
+            sourceButton(.heartRate, title: "Heart", icon: "heart.fill")
+        }
+    }
+
+    private func sourceButton(_ source: BeatPlayer.TempoSource, title: String, icon: String) -> some View {
+        let selected = tempoSource == source
+        return Button {
+            tempoSourceRaw = source.rawValue
+        } label: {
+            Label(title, systemImage: icon)
+                .font(.caption2.bold())
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 6)
+                .background(selected ? accent : Color.gray.opacity(0.25))
+                .foregroundColor(.white)
+                .clipShape(Capsule())
+        }
+        .buttonStyle(.plain)
     }
 
     private var baseTempoRow: some View {

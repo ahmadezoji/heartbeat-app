@@ -16,6 +16,8 @@ final class WorkoutManager: NSObject, ObservableObject {
     /// Wired directly to the audio so tempo keeps adapting with the screen off
     /// (SwiftUI `onChange` is not guaranteed to fire in the background).
     var onSpeedChange: ((Double) -> Void)?
+    /// Called on every heart-rate reading, including while the wrist is down.
+    var onHeartRateChange: ((Double) -> Void)?
 
     private let healthStore = HKHealthStore()
     private let locationManager = CLLocationManager()
@@ -122,6 +124,9 @@ extension WorkoutManager: HKLiveWorkoutBuilderDelegate {
               let stats = workoutBuilder.statistics(for: hrType),
               let value = stats.mostRecentQuantity()?.doubleValue(for: HKUnit.count().unitDivided(by: .minute()))
         else { return }
-        DispatchQueue.main.async { self.heartRate = value }
+        DispatchQueue.main.async {
+            self.heartRate = value
+            self.onHeartRateChange?(value)
+        }
     }
 }
