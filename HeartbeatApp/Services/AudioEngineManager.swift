@@ -19,14 +19,25 @@ final class AudioEngineManager: ObservableObject {
     private let playerNode = AVAudioPlayerNode()
     private let timePitch = AVAudioUnitTimePitch()
     private var audioBuffer: AVAudioPCMBuffer?
-    private var baseTempo = TempoCalculator.defaultTempo
-    private var speedFactor = TempoCalculator.defaultSpeedFactor
-    private var lastSpeed: Double = 0
 
     init() {
         configureAudioSession()
         configureEngine()
         loadDefaultTrack()
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(engineConfigurationChanged),
+            name: .AVAudioEngineConfigurationChange, object: engine)
+    }
+
+    /// A route or session change (e.g. the Compose tab enabling the mic) stops
+    /// the engine and its player; resume playback if we were playing.
+    @objc private func engineConfigurationChanged(_ note: Notification) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.isPlaying else { return }
+            self.playerNode.stop()
+            self.isPlaying = false
+            self.play()
+        }
     }
 
     /// Loads the bundled default track so the app plays out of the box.
@@ -38,7 +49,8 @@ final class AudioEngineManager: ObservableObject {
         }
     }
 
-    func loadAudio(from url: URL) {
+    /// - Parameter naturalTempo: tempo at which the imported track plays at 1.0×.
+    func loadAudio(from url: URL, naturalTempo: Double) {
         stop()
         let needsSecurityScope = url.startAccessingSecurityScopedResource()
         defer {
@@ -51,7 +63,7 @@ final class AudioEngineManager: ObservableObject {
             if loadFile(at: fileURL, displayName: url.lastPathComponent) {
                 // An imported track's BPM is unknown: treat the current Base Tempo
                 // as its natural speed, so it starts at 1.0× and Base changes from there.
-                trackTempo = baseTempo
+                trackTempo = naturalTempo
                 applyTempo()
             }
         } catch {
@@ -108,18 +120,9 @@ final class AudioEngineManager: ObservableObject {
         statusText = "Stopped."
     }
 
-    func updateBaseTempo(_ tempo: Double) {
-        baseTempo = tempo
-        applyTempo()
-    }
-
-    func updateSpeedFactor(_ factor: Double) {
-        speedFactor = factor
-        applyTempo()
-    }
-
-    func updateSpeed(_ speed: Double) {
-        lastSpeed = speed
+    /// Sets the target tempo (computed by `TempoController` from base tempo + speed).
+    func updateTempo(_ tempo: Double) {
+        currentTempo = tempo
         applyTempo()
     }
 
@@ -159,13 +162,7 @@ final class AudioEngineManager: ObservableObject {
     }
 
     private func applyTempo() {
-        let newTempo = TempoCalculator.calculateTempo(
-            baseTempo: baseTempo,
-            speedMetersPerSecond: lastSpeed,
-            speedFactor: speedFactor
-        )
-        currentTempo = newTempo
-
+        let newTempo = currentTempo
         // Relative to the track's own tempo (not baseTempo), otherwise the rate
         // is always 1.0× when standing still and Base Tempo has no audible effect.
         let rate = TempoCalculator.rate(for: newTempo, baseTempo: trackTempo)

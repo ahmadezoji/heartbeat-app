@@ -4,15 +4,12 @@ import UniformTypeIdentifiers
 struct HomeView: View {
     @EnvironmentObject private var audioManager: AudioEngineManager
     @EnvironmentObject private var locationManager: LocationManager
+    @EnvironmentObject private var tempo: TempoController
 
     @State private var showImporter = false
-    @State private var baseTempo: Double = TempoCalculator.defaultTempo
-    @State private var speedFactor: Double = TempoCalculator.defaultSpeedFactor
-    @State private var didSetInitialTempo = false
     @State private var pulse = false
 
     private let accent = Color("AccentColor")
-    private let tempoRange: ClosedRange<Double> = 40...200
 
     var body: some View {
         NavigationStack {
@@ -55,35 +52,16 @@ struct HomeView: View {
             switch result {
             case .success(let urls):
                 if let url = urls.first {
-                    audioManager.loadAudio(from: url)
+                    audioManager.loadAudio(from: url, naturalTempo: tempo.baseTempo)
                 }
             case .failure(let error):
                 audioManager.setError(error.localizedDescription)
             }
         }
-        .onChange(of: baseTempo) { newValue in
-            audioManager.updateBaseTempo(newValue)
-        }
-        .onChange(of: speedFactor) { newValue in
-            audioManager.updateSpeedFactor(newValue)
-        }
-        .onChange(of: locationManager.speedMetersPerSecond) { newValue in
-            audioManager.updateSpeed(newValue)
-        }
         .onChange(of: audioManager.isPlaying) { playing in
             pulse = playing
         }
-        .onAppear {
-            if !didSetInitialTempo {
-                // Start at the loaded track's own tempo (126 BPM for the default song).
-                baseTempo = audioManager.trackTempo
-                didSetInitialTempo = true
-            }
-            audioManager.updateBaseTempo(baseTempo)
-            audioManager.updateSpeedFactor(speedFactor)
-            locationManager.requestAuthorization()
-            locationManager.startTracking()
-        }
+        .onAppear { pulse = audioManager.isPlaying }
     }
 
     // MARK: - Player
@@ -162,10 +140,10 @@ struct HomeView: View {
         VStack(alignment: .leading, spacing: 14) {
             cardTitle("Base tempo", subtitle: "Your tempo when standing still")
             HStack {
-                roundButton("minus") { baseTempo = max(tempoRange.lowerBound, baseTempo - 2) }
+                roundButton("minus") { tempo.nudgeBaseTempo(by: -2) }
                 Spacer()
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Text("\(Int(baseTempo))")
+                    Text("\(Int(tempo.baseTempo))")
                         .font(.system(size: 40, weight: .bold, design: .rounded))
                         .monospacedDigit()
                     Text("BPM")
@@ -173,7 +151,7 @@ struct HomeView: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                roundButton("plus") { baseTempo = min(tempoRange.upperBound, baseTempo + 2) }
+                roundButton("plus") { tempo.nudgeBaseTempo(by: 2) }
             }
         }
         .card()
@@ -184,14 +162,14 @@ struct HomeView: View {
     private var speedCard: some View {
         VStack(alignment: .leading, spacing: 14) {
             cardTitle("Speed influence", subtitle: "How much running faster raises the tempo")
-            Slider(value: $speedFactor, in: 0...12, step: 0.5)
+            Slider(value: $tempo.speedFactor, in: 0...12, step: 0.5)
                 .tint(accent)
             HStack {
-                Text("+\(speedFactor, specifier: "%.1f") BPM per m/s")
+                Text("+\(tempo.speedFactor, specifier: "%.1f") BPM per m/s")
                     .font(.subheadline.monospacedDigit())
                 Spacer()
                 // At 10 km/h (≈ 2.78 m/s) — makes the slider's effect visible while standing still.
-                Text("At 10 km/h: +\(Int((speedFactor * 10 / 3.6).rounded())) BPM")
+                Text("At 10 km/h: +\(Int((tempo.speedFactor * 10 / 3.6).rounded())) BPM")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -263,4 +241,5 @@ private extension View {
     HomeView()
         .environmentObject(AudioEngineManager())
         .environmentObject(LocationManager())
+        .environmentObject(TempoController())
 }
